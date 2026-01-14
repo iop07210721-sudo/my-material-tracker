@@ -22,62 +22,57 @@ COMMODITIES = {
     'Silver (白銀)': 'SI=F'
 }
 WEBHOOK_URL = os.getenv('DISCORD_WEBHOOK_URL')
-PREDICT_DAYS = 30  # 預測未來幾天
+PREDICT_DAYS = 30 
 
 # === AI 預測核心函數 ===
 def predict_future_trend(df):
-    # 1. 準備數據：將日期轉為數字 (第幾天) 讓電腦看得懂
+    # 準備數據
     df = df.reset_index()
-    df['Date_Num'] = df.index  # 0, 1, 2...
+    # 確保抓到正確的日期欄位名稱 (有些版本是 Date, 有些是 index)
+    date_col = 'Date' if 'Date' in df.columns else 'index'
     
+    df['Date_Num'] = df.index
     X = df[['Date_Num']].values
     y = df['Close'].values
 
-    # 2. 建立模型 (使用 3 次方多項式來模擬波動曲線)
+    # 建立模型 (3次多項式回歸)
     poly = PolynomialFeatures(degree=3)
     X_poly = poly.fit_transform(X)
-    
     model = LinearRegression()
     model.fit(X_poly, y)
 
-    # 3. 產生未來的日期數據
+    # 產生未來數據
     last_index = df['Date_Num'].iloc[-1]
     future_indexes = np.arange(last_index + 1, last_index + 1 + PREDICT_DAYS).reshape(-1, 1)
-    
-    # 4. 進行預測
     future_poly = poly.transform(future_indexes)
     future_prices = model.predict(future_poly)
     
-    # 5. 整理結果
-    last_date = df['Date'].iloc[-1]
+    # 整理日期 (基於最後一天往後推)
+    last_date = df[date_col].iloc[-1]
     future_dates = [last_date + timedelta(days=i) for i in range(1, PREDICT_DAYS + 1)]
     
     return future_dates, future_prices
 
 def find_best_timing(dates, prices):
-    # 找出預測區間內的最低點與最高點
-    min_price = np.min(prices)
-    max_price = np.max(prices)
-    
     min_idx = np.argmin(prices)
     max_idx = np.argmax(prices)
     
-    buy_date = dates[min_idx].strftime('%Y-%m-%d')
-    sell_date = dates[max_idx].strftime('%Y-%m-%d')
-    
     return {
-        "buy_date": buy_date,
-        "buy_price": min_price,
-        "sell_date": sell_date,
-        "sell_price": max_price
+        "buy_date": dates[min_idx].strftime('%Y-%m-%d'),
+        "buy_price": np.min(prices),
+        "sell_date": dates[max_idx].strftime('%Y-%m-%d'),
+        "sell_price": np.max(prices)
     }
 
 # === 基礎數據函數 ===
 def analyze_data(ticker):
     stock = yf.Ticker(ticker)
-    # 抓取 1 年的資料讓 AI 學得更準
     df = stock.history(period="1y") 
     if len(df) < 50: return None
+    
+    # 🔥🔥🔥 關鍵修正：強制移除時區資訊，解決 Matplotlib 報錯 🔥🔥🔥
+    if df.index.tz is not None:
+        df.index = df.index.tz_localize(None)
     
     # 計算 RSI
     delta = df['Close'].diff()
@@ -88,17 +83,15 @@ def analyze_data(ticker):
     
     return df
 
-# === 畫圖函數 (含預測線) ===
+# === 畫圖函數 ===
 def generate_chart(name, df, future_dates, future_prices, prediction_info):
     plt.figure(figsize=(10, 6))
     
-    # 1. 畫歷史數據 (實線)
+    # 畫圖
     plt.plot(df.index, df['Close'], label='歷史價格', color='black', alpha=0.6)
-    
-    # 2. 畫預測數據 (紅色虛線)
     plt.plot(future_dates, future_prices, label='AI 預測走勢', color='red', linestyle='--', linewidth=2)
     
-    # 3. 標示最佳買賣點
+    # 標示點
     plt.scatter(prediction_info['buy_date'], prediction_info['buy_price'], color='green', s=100, zorder=5, label='建議買點')
     plt.scatter(prediction_info['sell_date'], prediction_info['sell_price'], color='red', s=100, zorder=5, label='建議賣點')
 
@@ -116,8 +109,7 @@ def generate_chart(name, df, future_dates, future_prices, prediction_info):
 def send_discord_msg(name, current_price, prediction, image_buf):
     if not WEBHOOK_URL: return
 
-    # 根據預測判斷趨勢文字
-    trend_text = "震盪整理"
+    trend_text = "⚖️ 震盪整理"
     if prediction['sell_price'] > current_price * 1.05:
         trend_text = "🚀 看漲 (Bullish)"
     elif prediction['buy_price'] < current_price * 0.95:
@@ -137,11 +129,11 @@ def send_discord_msg(name, current_price, prediction, image_buf):
         "embeds": [{
             "title": f"📈 {name} 未來預測報告",
             "description": description,
-            "color": 0x5865F2, # Discord 藍色
+            "color": 0x5865F2,
             "footer": {"text": "⚠️ 預測僅供學術研究，投資有賺有賠"}
         }]
     }
-
+    
     files = {'file': ('chart.png', image_buf, 'image/png')}
     
     try:
@@ -153,30 +145,27 @@ def send_discord_msg(name, current_price, prediction, image_buf):
 
 # === 主程式 ===
 def main():
-    # 載入字型 (保留上次的修復)
-    font_path = 'NotoSansTC-Regular.otf'
+    # 字型設定 (嘗試載入下載的字型檔)
     try:
+        font_path = 'NotoSansTC-Regular.otf'
         fm.fontManager.addfont(font_path)
         plt.rcParams['font.family'] = ['Noto Sans CJK TC']
-    except:
-        pass
-    plt.rcParams['axes.unicode_minus'] = False
+    except Exception:
+        print("⚠️ 無法載入中文字型，將使用預設字型")
 
-    print("啟動 AI 預測引擎...")
+    plt.rcParams['axes.unicode_minus'] = False # 解決負號
+
+    print("啟動 AI 預測引擎 (V4.1)...")
     
     for name, ticker in COMMODITIES.items():
         try:
             df = analyze_data(ticker)
             if df is None: continue
             
-            # 執行預測
             future_dates, future_prices = predict_future_trend(df)
             prediction_info = find_best_timing(future_dates, future_prices)
-            
-            # 產生圖表
             chart_img = generate_chart(name, df, future_dates, future_prices, prediction_info)
             
-            # 發送通知
             current_price = df['Close'].iloc[-1]
             send_discord_msg(name, current_price, prediction_info, chart_img)
             

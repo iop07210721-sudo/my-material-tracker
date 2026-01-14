@@ -18,11 +18,11 @@ jobs:
       with:
         python-version: '3.11'
 
-    # === 刪除舊的，改成這個新的步驟：直接下載字型檔 ===
+    # === 下載中文字型 (確保這一步驟存在) ===
     - name: Download Font File
       run: |
         wget https://github.com/notofonts/noto-cjk/raw/main/Sans/OTF/TraditionalChinese/NotoSansCJKtc-Regular.otf -O NotoSansTC-Regular.otf
-    # =================================================
+    # =====================================
 
     - name: Install dependencies
       run: |
