@@ -1,9 +1,10 @@
 import yfinance as yf
 import pandas as pd
+import requests
+import os
 from datetime import datetime
 
-# 定義我們要追蹤的國際物料代碼 (Yahoo Finance 代碼)
-# GC=F: 黃金期貨, CL=F: 原油期貨, HG=F: 銅期貨, SI=F: 白銀
+# 定義物料代碼
 COMMODITIES = {
     'Gold (黃金)': 'GC=F',
     'Crude Oil (原油)': 'CL=F',
@@ -12,49 +13,65 @@ COMMODITIES = {
 }
 
 def get_trend_emoji(change):
-    if change > 0:
-        return "🔺"
-    elif change < 0:
-        return "🔻"
+    if change > 0: return "🔺"
+    elif change < 0: return "🔻"
     return "➖"
 
-def fetch_material_data():
-    print(f"--- 國際物料趨勢報告: {datetime.now().strftime('%Y-%m-%d')} ---")
+def send_discord_notification(message):
+    webhook_url = os.getenv('DISCORD_WEBHOOK_URL')
+    
+    if not webhook_url:
+        print("⚠️ 未設定 Discord Webhook，跳過通知")
+        return
+
+    data = {
+        "content": message,
+        "username": "物料趨勢機器人",
+        "avatar_url": "https://cdn-icons-png.flaticon.com/512/2534/2534204.png" # 金幣圖示
+    }
+    
+    try:
+        response = requests.post(webhook_url, json=data)
+        if response.status_code == 204:
+            print("✅ Discord 通知發送成功")
+        else:
+            print(f"❌ Discord 通知失敗: {response.status_code}")
+    except Exception as e:
+        print(f"❌ 發送錯誤: {e}")
+
+def fetch_and_notify():
+    # 準備通知標題
+    date_str = datetime.now().strftime('%Y-%m-%d')
+    report_msg = f"**📊 國際物料趨勢報告 - {date_str}**\n--------------------------------\n"
     
     results = []
     
     for name, ticker in COMMODITIES.items():
         try:
-            # 抓取過去 5 天的資料以計算短期趨勢
             ticker_obj = yf.Ticker(ticker)
             hist = ticker_obj.history(period="5d")
             
-            if len(hist) < 2:
-                continue
+            if len(hist) < 2: continue
 
-            # 取得最新價格與前一日收盤價
-            latest_price = hist['Close'].iloc[-1]
-            prev_close = hist['Close'].iloc[-2]
-            
-            # 計算漲跌幅
-            change = latest_price - prev_close
-            change_percent = (change / prev_close) * 100
-            
+            latest = hist['Close'].iloc[-1]
+            prev = hist['Close'].iloc[-2]
+            change = latest - prev
+            change_pct = (change / prev) * 100
             trend = get_trend_emoji(change)
             
-            print(f"{trend} {name}: {latest_price:.2f} (變動: {change_percent:.2f}%)")
-            
-            results.append({
-                "Material": name,
-                "Price": latest_price,
-                "Change%": change_percent
-            })
+            # 格式化每一行訊息
+            line = f"{trend} **{name}**: {latest:.2f} (變動: {change_pct:.2f}%)\n"
+            print(line.strip()) # 印在 Log
+            report_msg += line  # 加入通知訊息
             
         except Exception as e:
-            print(f"❌ 無法抓取 {name}: {e}")
+            print(f"❌ {name} 資料抓取失敗")
 
-    return results
+    # 加入結尾
+    report_msg += "--------------------------------\n*資料來源: Yahoo Finance*"
+    
+    # 發送通知
+    send_discord_notification(report_msg)
 
 if __name__ == "__main__":
-    fetch_material_data()
-    # 未來擴充：這裡可以加入程式碼將 results 存成 CSV 或發送 Line 通知
+    fetch_and_notify()

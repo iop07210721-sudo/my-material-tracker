@@ -30,4 +30,6 @@ jobs:
 
     # 4. 執行你的主程式
     - name: Run Material Script
+      env:
+        DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
       run: python main.py
