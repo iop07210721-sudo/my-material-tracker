@@ -1,0 +1,33 @@
+name: 每日物料趨勢追蹤
+
+# 設定觸發時間
+on:
+  schedule:
+    # 每天 UTC 時間 00:00 執行 (大約是台灣時間早上 08:00)
+    - cron: '0 0 * * *'
+  # 允許手動按按鈕觸發 (方便我們等一下測試)
+  workflow_dispatch:
+
+jobs:
+  run-tracker:
+    runs-on: ubuntu-latest  # 使用 Linux 虛擬機
+
+    steps:
+    # 1. 下載你的程式碼
+    - name: Checkout code
+      uses: actions/checkout@v3
+
+    # 2. 設定 Python 環境
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.9'
+
+    # 3. 安裝 Python 套件 (yfinance)
+    - name: Install dependencies
+      run: |
+        pip install -r requirements.txt
+
+    # 4. 執行你的主程式
+    - name: Run Material Script
+      run: python main.py
