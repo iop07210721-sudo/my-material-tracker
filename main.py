@@ -4,17 +4,13 @@ import requests
 import os
 import matplotlib
 import matplotlib.pyplot as plt
+# 新增這個：用來管理字型
+import matplotlib.font_manager as fm
 import io
 from datetime import datetime
 
 # 設定 Matplotlib 在後台執行
 matplotlib.use('Agg')
-
-# === 設定中文字型 (關鍵修改) ===
-# 告訴 matplotlib 優先使用 Noto Sans CJK TC (思源黑體繁體中文)
-plt.rcParams['font.sans-serif'] = ['Noto Sans CJK TC', 'Microsoft JhengHei', 'SimHei', 'Arial Unicode MS']
-# 解決負號 '-' 顯示為方塊的問題
-plt.rcParams['axes.unicode_minus'] = False
 
 # === 設定參數 ===
 COMMODITIES = {
@@ -37,23 +33,18 @@ def calculate_rsi(series, period=14):
 def analyze_data(ticker):
     stock = yf.Ticker(ticker)
     df = stock.history(period="6mo")
-    
     if len(df) < 50: return None
-
     df['RSI'] = calculate_rsi(df['Close'])
     df['SMA_5'] = df['Close'].rolling(window=5).mean()
     df['SMA_20'] = df['Close'].rolling(window=20).mean()
-    
     return df
 
 def get_signal(row):
     rsi = row['RSI']
     sma5 = row['SMA_5']
     sma20 = row['SMA_20']
-    
     signal = "⚖️ 觀望"
     color = 0x808080 
-
     if rsi < 30:
         signal = "🟢 強力買入 (超賣)"
         color = 0x00FF00
@@ -66,44 +57,32 @@ def get_signal(row):
     elif sma5 < sma20 and row['Open'] > sma20:
         signal = "🟠 死亡交叉 (轉空)"
         color = 0xFFA500
-
     return signal, color
 
-# === 畫圖函數 (修改為中文標籤) ===
+# === 畫圖函數 (中文標籤) ===
 def generate_chart(name, df):
     plt.figure(figsize=(10, 5))
-    
-    # 修改這裡：label 改成中文
     plt.plot(df.index, df['Close'], label='價格', color='black', alpha=0.5)
-    
-    # 修改這裡：label 改成中文
     plt.plot(df.index, df['SMA_20'], label='20日均線 (趨勢)', color='orange', linestyle='--')
-    
-    # 修改這裡：標題改成中文
     plt.title(f"{name} - 近6個月趨勢分析")
-    
-    plt.legend(loc='upper left') # 將圖例移到左上角，避免擋住線圖
+    plt.legend(loc='upper left')
     plt.grid(True, alpha=0.3)
-    
     buf = io.BytesIO()
-    plt.savefig(buf, format='png', dpi=100) # 增加 dpi 讓文字更清晰
+    plt.savefig(buf, format='png', dpi=100)
     buf.seek(0)
     plt.close()
     return buf
 
-# === 發送通知 (含圖片) ===
+# === 發送通知 ===
 def send_discord_msg(name, data, signal, color, image_buf):
     if not WEBHOOK_URL: return
-
     price = data['Close']
     rsi = data['RSI']
-    
     description = f"""
     **現價:** ${price:.2f}
     **RSI:** {rsi:.1f}
     **分析:** {signal}
     """
-
     payload = {
         "username": "AI 分析師",
         "embeds": [{
@@ -113,25 +92,31 @@ def send_discord_msg(name, data, signal, color, image_buf):
             "footer": {"text": f"更新時間: {datetime.now().strftime('%Y-%m-%d')}"}
         }]
     }
-
-    files = {
-        'file': ('chart.png', image_buf, 'image/png')
-    }
-    
+    files = {'file': ('chart.png', image_buf, 'image/png')}
     try:
         import json
-        requests.post(
-            WEBHOOK_URL, 
-            data={'payload_json': json.dumps(payload)}, 
-            files=files
-        )
+        requests.post(WEBHOOK_URL, data={'payload_json': json.dumps(payload)}, files=files)
         print(f"✅ {name} 通知已發送")
     except Exception as e:
         print(f"❌ 發送失敗: {e}")
 
 # === 主程式 ===
 def main():
-    print("啟動中文圖表分析引擎...")
+    # === 關鍵修改：強制載入下載的字型檔 ===
+    font_path = 'NotoSansTC-Regular.otf'
+    try:
+        # 強制將這個檔案加入字型管理器
+        fm.fontManager.addfont(font_path)
+        # 設定預設字型為我們剛剛加入的字型名稱
+        plt.rcParams['font.family'] = ['Noto Sans CJK TC']
+        print("✅ 成功載入中文字型檔案")
+    except Exception as e:
+        print(f"⚠️ 載入字型失敗，圖表中文可能會變方塊: {e}")
+    # =====================================
+
+    plt.rcParams['axes.unicode_minus'] = False # 解決負號問題
+
+    print("啟動中文圖表分析引擎 (暴力載入版)...")
     for name, ticker in COMMODITIES.items():
         try:
             df = analyze_data(ticker)
