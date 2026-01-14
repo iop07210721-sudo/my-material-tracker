@@ -10,6 +10,10 @@ import io
 from datetime import datetime, timedelta
 from sklearn.linear_model import LinearRegression
 from sklearn.preprocessing import PolynomialFeatures
+from pandas.plotting import register_matplotlib_converters
+
+# 1. 強制註冊轉換器 (解決 Pandas 與 Matplotlib 的溝通問題)
+register_matplotlib_converters()
 
 # 設定 Matplotlib 在後台執行
 matplotlib.use('Agg')
@@ -24,18 +28,23 @@ COMMODITIES = {
 WEBHOOK_URL = os.getenv('DISCORD_WEBHOOK_URL')
 PREDICT_DAYS = 30 
 
+# === 核心：日期強力清洗函數 (V4.2 新增) ===
+def clean_date(dt_input):
+    """將任何日期格式強制轉換為無時區的 Python datetime"""
+    # 先轉成 Pandas Timestamp，再轉成 Python datetime，最後移除時區
+    return pd.to_datetime(dt_input).to_pydatetime().replace(tzinfo=None)
+
 # === AI 預測核心函數 ===
 def predict_future_trend(df):
     # 準備數據
     df = df.reset_index()
-    # 確保抓到正確的日期欄位名稱 (有些版本是 Date, 有些是 index)
-    date_col = 'Date' if 'Date' in df.columns else 'index'
     
+    # 建立數值化的日期 (0, 1, 2...)
     df['Date_Num'] = df.index
     X = df[['Date_Num']].values
     y = df['Close'].values
 
-    # 建立模型 (3次多項式回歸)
+    # 建立模型 (3次多項式)
     poly = PolynomialFeatures(degree=3)
     X_poly = poly.fit_transform(X)
     model = LinearRegression()
@@ -48,7 +57,8 @@ def predict_future_trend(df):
     future_prices = model.predict(future_poly)
     
     # 整理日期 (基於最後一天往後推)
-    last_date = df[date_col].iloc[-1]
+    # 這裡也要確保 last_date 是乾淨的
+    last_date = clean_date(df['Date'].iloc[-1] if 'Date' in df.columns else df.index[-1])
     future_dates = [last_date + timedelta(days=i) for i in range(1, PREDICT_DAYS + 1)]
     
     return future_dates, future_prices
@@ -70,9 +80,9 @@ def analyze_data(ticker):
     df = stock.history(period="1y") 
     if len(df) < 50: return None
     
-    # 🔥🔥🔥 關鍵修正：強制移除時區資訊，解決 Matplotlib 報錯 🔥🔥🔥
-    if df.index.tz is not None:
-        df.index = df.index.tz_localize(None)
+    # 🔥🔥🔥 V4.2 修正：暴力清洗 Index 日期 🔥🔥🔥
+    # 使用 map 強制對每一個日期執行清洗，不依賴 pandas 版本
+    df.index = df.index.map(clean_date)
     
     # 計算 RSI
     delta = df['Close'].diff()
@@ -87,13 +97,19 @@ def analyze_data(ticker):
 def generate_chart(name, df, future_dates, future_prices, prediction_info):
     plt.figure(figsize=(10, 6))
     
+    # 🔥🔥🔥 確保 future_dates 也是乾淨的 (雙重保險) 🔥🔥🔥
+    future_dates = [clean_date(d) for d in future_dates]
+
     # 畫圖
     plt.plot(df.index, df['Close'], label='歷史價格', color='black', alpha=0.6)
     plt.plot(future_dates, future_prices, label='AI 預測走勢', color='red', linestyle='--', linewidth=2)
     
-    # 標示點
-    plt.scatter(prediction_info['buy_date'], prediction_info['buy_price'], color='green', s=100, zorder=5, label='建議買點')
-    plt.scatter(prediction_info['sell_date'], prediction_info['sell_price'], color='red', s=100, zorder=5, label='建議賣點')
+    # 轉換日期字串回 datetime 以便畫點
+    buy_dt = datetime.strptime(prediction_info['buy_date'], '%Y-%m-%d')
+    sell_dt = datetime.strptime(prediction_info['sell_date'], '%Y-%m-%d')
+    
+    plt.scatter(buy_dt, prediction_info['buy_price'], color='green', s=100, zorder=5, label='建議買點')
+    plt.scatter(sell_dt, prediction_info['sell_price'], color='red', s=100, zorder=5, label='建議賣點')
 
     plt.title(f"{name} - AI 趨勢預測 (未來30天)")
     plt.legend(loc='upper left')
@@ -145,7 +161,7 @@ def send_discord_msg(name, current_price, prediction, image_buf):
 
 # === 主程式 ===
 def main():
-    # 字型設定 (嘗試載入下載的字型檔)
+    # 字型設定
     try:
         font_path = 'NotoSansTC-Regular.otf'
         fm.fontManager.addfont(font_path)
@@ -153,9 +169,9 @@ def main():
     except Exception:
         print("⚠️ 無法載入中文字型，將使用預設字型")
 
-    plt.rcParams['axes.unicode_minus'] = False # 解決負號
+    plt.rcParams['axes.unicode_minus'] = False 
 
-    print("啟動 AI 預測引擎 (V4.1)...")
+    print("啟動 AI 預測引擎 (V4.2 終極修復版)...")
     
     for name, ticker in COMMODITIES.items():
         try:
@@ -171,6 +187,9 @@ def main():
             
         except Exception as e:
             print(f"❌ 預測 {name} 時發生錯誤: {e}")
+            # 印出更多錯誤細節幫助除錯
+            import traceback
+            traceback.print_exc()
 
 if __name__ == "__main__":
     main()
