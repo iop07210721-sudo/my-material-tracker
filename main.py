@@ -7,8 +7,14 @@ import matplotlib.pyplot as plt
 import io
 from datetime import datetime
 
-# 設定 Matplotlib 在後台執行 (重要！不然在 GitHub 上會報錯)
+# 設定 Matplotlib 在後台執行
 matplotlib.use('Agg')
+
+# === 設定中文字型 (關鍵修改) ===
+# 告訴 matplotlib 優先使用 Noto Sans CJK TC (思源黑體繁體中文)
+plt.rcParams['font.sans-serif'] = ['Noto Sans CJK TC', 'Microsoft JhengHei', 'SimHei', 'Arial Unicode MS']
+# 解決負號 '-' 顯示為方塊的問題
+plt.rcParams['axes.unicode_minus'] = False
 
 # === 設定參數 ===
 COMMODITIES = {
@@ -46,43 +52,43 @@ def get_signal(row):
     sma20 = row['SMA_20']
     
     signal = "⚖️ 觀望"
-    color = 0x808080 # 灰色
+    color = 0x808080 
 
     if rsi < 30:
         signal = "🟢 強力買入 (超賣)"
-        color = 0x00FF00 # 綠色
+        color = 0x00FF00
     elif rsi > 70:
         signal = "🔴 建議賣出 (超買)"
-        color = 0xFF0000 # 紅色
+        color = 0xFF0000
     elif sma5 > sma20 and row['Open'] < sma20:
         signal = "🔵 黃金交叉 (轉多)"
-        color = 0x0000FF # 藍色
+        color = 0x0000FF
     elif sma5 < sma20 and row['Open'] > sma20:
         signal = "🟠 死亡交叉 (轉空)"
-        color = 0xFFA500 # 橘色
+        color = 0xFFA500
 
     return signal, color
 
-# === 畫圖函數 (核心新功能) ===
+# === 畫圖函數 (修改為中文標籤) ===
 def generate_chart(name, df):
-    # 設定畫布大小
     plt.figure(figsize=(10, 5))
     
-    # 畫價格線
-    plt.plot(df.index, df['Close'], label='Price', color='black', alpha=0.5)
+    # 修改這裡：label 改成中文
+    plt.plot(df.index, df['Close'], label='價格', color='black', alpha=0.5)
     
-    # 畫均線 (趨勢線)
-    plt.plot(df.index, df['SMA_20'], label='SMA 20 (Trend)', color='orange', linestyle='--')
+    # 修改這裡：label 改成中文
+    plt.plot(df.index, df['SMA_20'], label='20日均線 (趨勢)', color='orange', linestyle='--')
     
-    plt.title(f"{name} - 6 Month Trend Analysis")
-    plt.legend()
+    # 修改這裡：標題改成中文
+    plt.title(f"{name} - 近6個月趨勢分析")
+    
+    plt.legend(loc='upper left') # 將圖例移到左上角，避免擋住線圖
     plt.grid(True, alpha=0.3)
     
-    # 將圖片存到記憶體中 (不存成檔案，比較快)
     buf = io.BytesIO()
-    plt.savefig(buf, format='png')
+    plt.savefig(buf, format='png', dpi=100) # 增加 dpi 讓文字更清晰
     buf.seek(0)
-    plt.close() # 關閉畫布釋放記憶體
+    plt.close()
     return buf
 
 # === 發送通知 (含圖片) ===
@@ -92,14 +98,12 @@ def send_discord_msg(name, data, signal, color, image_buf):
     price = data['Close']
     rsi = data['RSI']
     
-    # 準備文字內容
     description = f"""
     **現價:** ${price:.2f}
     **RSI:** {rsi:.1f}
     **分析:** {signal}
     """
 
-    # 準備 Payload
     payload = {
         "username": "AI 分析師",
         "embeds": [{
@@ -110,16 +114,11 @@ def send_discord_msg(name, data, signal, color, image_buf):
         }]
     }
 
-    # 發送請求 (包含圖片檔案)
     files = {
         'file': ('chart.png', image_buf, 'image/png')
     }
     
-    # 這裡有點小技巧：Discord 允許我們把圖片當附件，然後在 Payload 裡引用它
-    # 但最簡單的方法是：文字歸文字，圖片歸圖片，一起傳過去
-    
     try:
-        # 由於 requests 傳檔案比較複雜，我們把 embed 轉成 json 字串傳送
         import json
         requests.post(
             WEBHOOK_URL, 
@@ -132,22 +131,15 @@ def send_discord_msg(name, data, signal, color, image_buf):
 
 # === 主程式 ===
 def main():
-    print("啟動圖表分析引擎...")
-    
+    print("啟動中文圖表分析引擎...")
     for name, ticker in COMMODITIES.items():
         try:
             df = analyze_data(ticker)
             if df is None: continue
-
             latest = df.iloc[-1]
             signal, color = get_signal(latest)
-            
-            # 產生圖表
             chart_img = generate_chart(name, df)
-            
-            # 發送 (包含圖片)
             send_discord_msg(name, latest, signal, color, chart_img)
-            
         except Exception as e:
             print(f"❌ 處理 {name} 時發生錯誤: {e}")
 
